@@ -141,6 +141,7 @@ if (!file.exists(myRFModelFilename)) {
 print(myRFModel, digits=4)
 rfPrediction <- predict(myRFModel, training_crossval_data)
 rf_conf<-confusionMatrix(training_crossval_data$classe, rfPrediction)
+rf_conf
 ```
 Prediction
 ```{r, cache = T}
@@ -157,4 +158,4 @@ plot(rf_conf$table, col = rf_conf$byClass,
 
 
 ### 7.0 Conclusion
-It is evident from the result, the random forest algorithm performs better than the decision tree in terms of accuracy. We are getting 99.25% in sample accuracy, while the decision tree gives us only nearly 48.59% in sample accuracy
+It is evident from the result, the random forest algorithm performs better than the decision tree in terms of accuracy. We are getting 99.84% in sample accuracy, while the decision tree gives us only nearly 49.23% in sample accuracy
