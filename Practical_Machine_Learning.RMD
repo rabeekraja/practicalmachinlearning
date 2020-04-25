@@ -1,0 +1,160 @@
+---
+title: "PracticalMachineLearning"
+author: "rmydeen"
+date: "4/25/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment
+
+### 1.0 Library Loading
+
+```{r, cache = T}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+```
+### 2.0 Download data files
+```{r, cache = T}
+trainingUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainingFile <- "./learning-data/pml-training.csv"
+testFile  <- "./learning-data/pml-testing.csv"
+if (!file.exists("./learning-data")) {
+  dir.create("./learning-data")
+}
+if (!file.exists(trainingFile)) {
+  download.file(trainingUrl, destfile=trainingFile, method="curl")
+}
+if (!file.exists(testFile)) {
+  download.file(testUrl, destfile=testFile, method="curl")
+}
+``` 
+### 3.0 Read the Data
+Read files into data frame
+```{r, cache = T}
+training_data <- read.csv(trainingFile, na.strings = c("NA", "#DIV/0!", ""))
+test_data <- read.csv(testFile, na.strings = c("NA", "#DIV/0!", ""))
+dim(training_data)
+dim(test_data)
+```
+
+### 4.0 Data cleaning
+Let us remove those data contains more than 85% of the observation is NA and exclude those data.
+```{r, cache = T}
+onlyCleanColumns <- colSums(is.na(training_data))/nrow(training_data) < 0.85
+clean_data <- training_data[,onlyCleanColumns]
+```
+Make sure no NA records
+```{r, cache = T}
+colSums(is.na(clean_data))/nrow(clean_data)
+colSums(is.na(clean_data))
+```
+Now let us remove the columns that do not contribute much to the accelerometer measurements
+```{r, cache = T}
+classe <- clean_data$classe
+trainRemove <- grepl("^X|timestamp|window", names(clean_data))
+clean_data <- clean_data[, !trainRemove]
+trainCleaned <- clean_data[, sapply(clean_data, is.numeric)]
+trainCleaned$classe <- classe
+testRemove <- grepl("^X|timestamp|window", names(test_data))
+test_data <- test_data[, !testRemove]
+testCleaned <- test_data[, sapply(test_data, is.numeric)]
+```
+Data set segregated into 75% of training set and 25% for testing set.
+```{r, cache = T}
+inTrainIndex <- createDataPartition(trainCleaned$classe, p=0.75)[[1]]
+training_training_data <- trainCleaned[inTrainIndex,]
+training_crossval_data <- trainCleaned[-inTrainIndex,]
+```
+
+```{r, cache = T}
+allNames <- names(trainCleaned)
+clean_test_data <- test_data[,allNames[1:52]]
+```
+### 5.0 Decision Tree Based - ML
+The prediction accuracy is about 49% which is not at desired level with decision tree model.
+```{r, cache = T}
+decisionTreeMod <- train(classe ~., method='rpart', data=training_training_data)
+
+decisionTreePrediction <- predict(decisionTreeMod, training_crossval_data)
+confusionMatrix(training_crossval_data$classe, decisionTreePrediction)
+rpart.plot(decisionTreeMod$finalModel)
+```
+
+
+### 6.0 Random Forest Based - ML
+Using parallel core to ramp up running time for Random Forest.Write result into file and then reuse it .
+```{r, cache = T}
+myRFModelFilename <- "myRFModel.RData"
+if (!file.exists(myRFModelFilename)) {
+
+    # Parallel cores required to run this program  
+    #require(parallel)
+    library(doParallel)
+    #Detect number of cores and take one less
+    ncores <- makeCluster(detectCores() - 1)
+    registerDoParallel(cores=ncores)
+    getDoParWorkers()
+    
+   
+    myRFModel <- train(classe ~ .
+                , data = training_training_data
+                , method = "rf"
+                , metric = "Accuracy" 
+                , preProcess=c("center", "scale") 
+                , trControl=trainControl(method = "cv"
+                                        , number = 4 
+                                        , p= 0.75
+                                        , allowParallel = TRUE 
+                                        )
+                )
+
+    save(myRFModel, file = "myRFModel.RData")
+    stopCluster(ncores)
+} else {
+    # Use cached model  
+    load(file = myRFModelFilename, verbose = TRUE)
+}
+print(myRFModel, digits=4)
+rfPrediction <- predict(myRFModel, training_crossval_data)
+rf_conf<-confusionMatrix(training_crossval_data$classe, rfPrediction)
+```
+Prediction
+```{r, cache = T}
+predict(myRFModel, clean_test_data)
+```
+Plot the prediction
+From the Confusion Matrix fro RF, we can  see that the prediction accuracy of Random Forest model is about 99% in satisfactory level.
+```{r, cache = T}
+plot(rf_conf$table, col = rf_conf$byClass, 
+     main = paste("Random Forest - Accuracy Level =",
+                  round(rf_conf$overall['Accuracy'], 4)))
+
+```     
+
+
+### 7.0 Conclusion
+It is evident from the result, the random forest algorithm performs better than the decision tree in terms of accuracy. We are getting 99.25% in sample accuracy, while the decision tree gives us only nearly 48.59% in sample accuracy
